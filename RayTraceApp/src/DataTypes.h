@@ -8,14 +8,24 @@ using namespace glm;
 struct Ray {
 	vec3 Origin;
 	vec3 Direction;
+
+	bool hit = false;
+	float dst = FLT_MAX;
+	uint32_t ObjectIndex;
 };
 
 // Store hit infor
 struct HitInfo {
+	// Ray Info
 	bool didHit;
-	float dst;
-	vec3 hitPoint;
-	vec3 normal;
+	float hitDistance;
+
+	// Object Info
+	uint32_t ObjectIndex;
+
+	// World Info
+	vec3 worldPos;
+	vec3 worldNormal;
 };
 
 // Simple Color Info
@@ -33,7 +43,7 @@ struct SimpleSphereInfo {
 };
 
 // Image Processing Info
-struct PreRenderInfo {
+struct RenderInfo {
 	// Camera Info
 	vec3 CameraPosition;
 	mat4 CameraInverseView;
@@ -49,5 +59,9 @@ struct PreRenderInfo {
 	int SphereCount;
 	int MaterialCount;
 	
+	// Random Number Seed
 	uint32_t seed;
+
+	// Ray Tracing Settings
+	int BounceCount = 1;
 };

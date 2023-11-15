@@ -3,6 +3,7 @@
 #include "../DataTypes.h"
 
 // STD Libs
+#include <math.h>
 #include <vector>
 #include <chrono>
 #include <ctime>

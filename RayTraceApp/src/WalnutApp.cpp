@@ -32,58 +32,94 @@ public:
 	{
 		// Info window
 		ImGui::Begin("Info");
-		ImGui::Text("Last render: %.3fms", r.m_LastRenderTime);
-		if (r.m_Image) {
-			ImGui::Text("Width: %ipx", r.getCurrentWidth());
-			ImGui::Text("Height: %ipx", r.getCurrentHeight());
-			ImGui::Text("Total Pixels: %ipx", r.getCurrentTotalPixels());
-		}
+
+			if (r.m_Image) {
+				ImGui::Text("Last render: %.3fms", r.m_LastRenderTime);
+				ImGui::Text("Width:	%ipx",				r.getCurrentWidth()			);
+				ImGui::Text("Height: %ipx",				r.getCurrentHeight()		);
+				ImGui::Text("Total Pixels: %ipx",		r.getCurrentTotalPixels()	);
+				ImGui::Text("Total Spheres:	%i",		scene.SphereTotal()			);
+				ImGui::Text("Current Ray Bounces: %i",	*r.getCurrentBounceCount()	);
+			}
 
 		ImGui::End();
+
+		// Settings
+		ImGui::Begin("Settings");
+
+			// Set Ray Bounces
+			ImGui::SliderInt(": Ray Bounces", r.getCurrentBounceCount(), 0, 50);
+
+			// Seperate Ray from Sphere settings
+			ImGui::Separator();
+
+			// See if spheres need to be added
+			ImGui::SliderInt(": Spheres to add", &numOfSphereToAdd, 0, 1000);
+
+			if (ImGui::Button("Add Sphere")) {
+				sphereHandleCount = numOfSphereToAdd;
+				for (int i = 0; i < sphereHandleCount; i++) {
+					scene.addSphere(Scene::createSphere());
+					scene.updateScene();
+				}
+
+				sphereHandleCount = 0;
+			}
+
+			if (ImGui::Button("Delete Sphere")) {
+				sphereHandleCount = numOfSphereToAdd;
+
+				for (int i = 0; i < sphereHandleCount; i++) {
+					scene.removeSphere(scene.SphereTotal() - 1);
+					scene.updateScene();
+				}
+
+				sphereHandleCount = 0;
+			}
+
+		ImGui::End();
+
 
 		// Scene Config panel
 		ImGui::Begin("SceneConfig");
 
-		if (ImGui::Button("Add Sphere"))	{ scene.addSphere(Scene::createSphere());		scene.updateScene(); }
-		if (ImGui::Button("Delete Sphere")) { scene.removeSphere(scene.SphereTotal() - 1);  scene.updateScene(); }
+			// Sphere controls
+			for (int i = 0; i < scene.sphereSet.size(); i++) {
+				ImGui::PushID(i);
 
-		for (int i = 0; i < scene.sphereSet.size(); i++) {
-			ImGui::PushID(i);
+				// Create a control panel for the sphere
+				int sphereNumber = i + 1;
+				std::string txt = "Sphere: " + std::to_string(sphereNumber);
+				ImGui::Text(txt.c_str());
 
-			// Create a control panel for the sphere
-			int sphereNumber = i + 1;
-			std::string txt = "Sphere: " + std::to_string(sphereNumber);
-			ImGui::Text(txt.c_str());
+				// Set up Controls for the sphere
+				SimpleSphereInfo& sphere = scene.sphereSet[i];
+				if ( ImGui::Checkbox("Visable", &sphere.visable)					 ) { scene.updateScene(); }
+				if ( ImGui::DragFloat3("Position", value_ptr(sphere.position), 0.1f) ) { scene.updateScene(); }
+				if ( ImGui::DragFloat("Radius", &sphere.radius, 0.1f)				 ) { scene.updateScene(); }
+				if ( ImGui::ColorEdit3("Color", value_ptr(sphere.material.color))	 ) { scene.updateScene(); }
 
-			// Set up Controls for the sphere
-			SimpleSphereInfo& sphere = scene.sphereSet[i];
-			if ( ImGui::Checkbox("Visable", &sphere.visable)					 ) { scene.updateScene(); }
-			if ( ImGui::DragFloat3("Position", value_ptr(sphere.position), 0.1f) ) { scene.updateScene(); }
-			if ( ImGui::DragFloat("Radius", &sphere.radius, 0.1f)				 ) { scene.updateScene(); }
-			if ( ImGui::ColorEdit3("Color", value_ptr(sphere.material.color))	 ) { scene.updateScene(); }
-
-			ImGui::Separator();
-			ImGui::PopID();
-		}
-
+				ImGui::Separator();
+				ImGui::PopID();
+			}
 
 		ImGui::End();
 
 		// Render Window
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(2.0f, 2.0f));
-		ImGui::Begin("ViewPort");
+			ImGui::Begin("ViewPort");
 
-		// Set dimensions and render image
-		camera.OnResize(ImGui::GetContentRegionAvail().x, ImGui::GetContentRegionAvail().y);
+				// Set dimensions and render image
+				camera.OnResize(ImGui::GetContentRegionAvail().x, ImGui::GetContentRegionAvail().y);
 
-		r.ResizeImage(ImGui::GetContentRegionAvail().x, ImGui::GetContentRegionAvail().y);
-		r.RenderImage(camera, scene);
+				r.ResizeImage(ImGui::GetContentRegionAvail().x, ImGui::GetContentRegionAvail().y);
+				r.RenderImage(camera, scene);
 
-		// Then render image if one is avaliable
-		if (r.m_Image)
-			ImGui::Image(r.m_Image->GetDescriptorSet(), { (float)r.m_Image->GetWidth(), (float)r.m_Image->GetHeight() }, ImVec2(0,1), ImVec2(1,0));
+				// Then render image if one is avaliable
+				if (r.m_Image)
+					ImGui::Image(r.m_Image->GetDescriptorSet(), { (float)r.m_Image->GetWidth(), (float)r.m_Image->GetHeight() }, ImVec2(0,1), ImVec2(1,0));
 
-		ImGui::End();
+			ImGui::End();
 		ImGui::PopStyleVar();
 	}
 
@@ -91,13 +127,15 @@ private:
 	Scene scene;
 	Camera camera;
 	Renderer r;
+	int sphereHandleCount = 0;
+	int numOfSphereToAdd = 0;
 };
 
 Walnut::Application* Walnut::CreateApplication(int argc, char** argv)
 {
 
 	Walnut::ApplicationSpecification spec;
-	spec.Name = "Ray Tracing Engine";
+	spec.Name = "RayTracingEngine";
 
 	Walnut::Application* app = new Walnut::Application(spec);
 	app->PushLayer<ExampleLayer>();

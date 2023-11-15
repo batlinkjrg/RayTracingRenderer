@@ -9,7 +9,7 @@ void Renderer::RenderImage(Camera& camera, Scene& scene) {
 	// Generate Image
 	SetSphereBuffers(scene);
 	SetPreRenderInfo(camera);
-	CudaImageGeneration( gpuPixelBuffer, gpuSphereBuffer, preRenderInfo);
+	CudaImageGeneration( gpuPixelBuffer, gpuSphereBuffer, renderInfo);
 	SetRenderedImage();
 
 	m_LastRenderTime = timer.ElapsedMillis();
@@ -17,19 +17,23 @@ void Renderer::RenderImage(Camera& camera, Scene& scene) {
 }
 
 void Renderer::SetPreRenderInfo(Camera& camera) {
+	// Set Seed
+	// Use time since epoch as a seed for the random number generator
+	renderInfo.seed = static_cast<uint32_t>(duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count());
+
 	// Set cameraInfo
-	preRenderInfo.CameraPosition = camera.GetPosition();
-	preRenderInfo.CameraInverseView = camera.GetInverseView();
-	preRenderInfo.CameraInverseProjection = camera.GetInverseProjection();
+	renderInfo.CameraPosition = camera.GetPosition();
+	renderInfo.CameraInverseView = camera.GetInverseView();
+	renderInfo.CameraInverseProjection = camera.GetInverseProjection();
 
 	// Set Image info
-	preRenderInfo.ImageHeight = m_Image->GetHeight();
-	preRenderInfo.ImageWidth = m_Image->GetWidth();
-	preRenderInfo.PixelCount = pixelCount;
-	preRenderInfo.PixelBufferSize = pixelBufferSize;
+	renderInfo.ImageHeight = m_Image->GetHeight();
+	renderInfo.ImageWidth = m_Image->GetWidth();
+	renderInfo.PixelCount = pixelCount;
+	renderInfo.PixelBufferSize = pixelBufferSize;
 
 	// Set Scene Info
-	preRenderInfo.SphereCount = sphereCount;
+	renderInfo.SphereCount = sphereCount;
 	
 	// TODO: Add material buffer!!
 }

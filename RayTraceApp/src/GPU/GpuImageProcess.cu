@@ -1,96 +1,124 @@
 #include "GpuImageProcess.h"
 
-__global__ void ImageGeneration(uint32_t* imageDataGPUptr, SimpleSphereInfo* gpuSphereBuffer, PreRenderInfo preRenderInfo) {
+__global__ void ImageGeneration(uint32_t* imageDataGPUptr, SimpleSphereInfo* gpuSphereBuffer, RenderInfo renderInfo) {
 
     // Use grid stepping method to loop through all the pixels
     // This allows for a flexible kernal launch, meaning all pixels are hit regardless of kernal luanch
     // This for loop will stop through all the pixels, whether that be all or grid-stepping //
     // 'i' is the index in the pixel array //
-    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < preRenderInfo.PixelCount; i += blockDim.x * gridDim.x) {
+    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < renderInfo.PixelCount; i += blockDim.x * gridDim.x) {
+        if (gpuSphereBuffer == nullptr) { break; }
 
         // Execute the pixel shader // This will simulate using glsl! //
-        vec2 coords = GetPixelCoordinatesFromIndex(i, preRenderInfo.ImageWidth, preRenderInfo.ImageHeight);
+        vec2 coords = GetPixelCoordinatesFromIndex(i, renderInfo.ImageWidth, renderInfo.ImageHeight);
 
-        Ray ray = CalculateRayDirection(coords, preRenderInfo.CameraPosition, preRenderInfo.CameraInverseView, preRenderInfo.CameraInverseProjection);
-
-        vec4 color = TraceRay(ray, gpuSphereBuffer, preRenderInfo);
+        // Execute Ray Tracing Pipeline
+        vec4 color = RayGen(coords, gpuSphereBuffer, renderInfo);
         color = clamp(color, vec4(0.0f), vec4(1.0f));
 
+        // Set Color
         imageDataGPUptr[i] = Vec4ToRGBA(color);
     }
 }
 
-__device__ vec4 TraceRay(const Ray& ray, SimpleSphereInfo* spheres, const PreRenderInfo& preRenderInfo) {
+__device__ vec4 RayGen(vec2 currentPixel, SimpleSphereInfo* spheres, RenderInfo& renderInfo) {
+    // Create a ray
+    Ray ray;
+    CalculateRayDirection(ray, currentPixel, renderInfo);
 
-    // Gaurd Clause
-    if (spheres == nullptr) { return vec4(0, 0, 0, 1); }
-    
-    // Prepare Some Hit Info
-    SimpleSphereInfo* closestSphere = nullptr;
-    float closestHit = FLT_MAX;
+    vec3 finalColor(0.0f);
+    float shadingMultiplier = 1.0f;
+    // Trace Ray for any number of bounces
+    for (int i = 0; i < renderInfo.BounceCount; i++) {
+        HitInfo hitInfo = TraceRay(ray, spheres, renderInfo);
+        if (!hitInfo.didHit) { 
+            vec3 backroundColor(0.0f, 0.0f, 0.0f);
+            finalColor += backroundColor * shadingMultiplier;
+            break;
+        }
 
-    for (int index = 0; index < preRenderInfo.SphereCount; index++) {
+        // Set Light Direction
+        vec3 lightDirection(-1, -1, -1);
+        lightDirection = normalize(lightDirection);
+
+        // If the value is nagetive than set it to zero //
+        float lightIntensity = max(dot(hitInfo.worldNormal, -lightDirection), 0.0f); // == cos(angle)
+
+        // Create a color
+        vec3 sphereColor = spheres[ray.ObjectIndex].material.color;
+        sphereColor *= lightIntensity;
+        
+        finalColor += sphereColor * shadingMultiplier;
+        shadingMultiplier *= 0.6f;
+
+        // Reset ray position // Move origin slightly off of sphere surface
+        ray.Origin = hitInfo.worldPos + (hitInfo.worldNormal * 0.0001f);
+        ray.Direction = reflect(ray.Direction, hitInfo.worldNormal);
+    }
+   
+
+
+    return vec4(finalColor, 1);
+}
+
+__device__ HitInfo TraceRay(Ray& ray, SimpleSphereInfo* spheres, RenderInfo& renderInfo) {
+    // Figure out if sphere was hit
+    for (int index = 0; index < renderInfo.SphereCount; index++) {
 
         // Get current sphere and immediatly check if its visable first //
         SimpleSphereInfo& sphere = spheres[index];
         if (!sphere.visable) { continue; }
 
-        // Add a third dimension (depth) for the ray direction
-        vec3 rayOrigin = ray.Origin - sphere.position;
-        vec3 rayDirection = ray.Direction;
-        rayDirection = normalize(rayDirection); // normalize the rayDirection
+        // Origin of the ray, relative to the current sphere
+        vec3 origin = ray.Origin - sphere.position;
 
         // Variables
-        float r = 0.5f;                                     // Radius of sphere
+        float a = dot(ray.Direction, ray.Direction);                          // Ray Origin
+        float b = 2.0f * dot(origin, ray.Direction);                          // Ray Direction
+        float c = dot(origin, origin) - (sphere.radius * sphere.radius);      // Ray Constant
 
-        float a = dot(rayDirection, rayDirection);          // Ray Origin
-        float b = 2.0f * dot(rayOrigin, rayDirection);      // Ray Direction
-        float c = dot(rayOrigin, rayOrigin) - (sphere.radius * sphere.radius);      // Ray Constant
-
-        float discriminent = (b * b) - (4.0f * a * c);      // Inside the square root
-
-        // If the ray misses exit early and move on to next sphere //
+        // Get descriminent, if less than zero no hit, next sphere
+        float discriminent = (b * b) - (4.0f * a * c);     
         if (discriminent < 0.0f) { continue; }
 
-        // Smallest solution to the quadratic formula // Exact intersection point
+        // Smallest solution to the quadratic formula // Exact intersection point // Test if closest point
         float hitDistance = ((-b) - sqrtf(discriminent)) / (2 * a);
-
-        if (hitDistance < closestHit) { 
-            closestHit = hitDistance; 
-            closestSphere = &sphere; 
+        if (hitDistance > 0.0f && hitDistance < ray.dst) {
+            ray.ObjectIndex = index;
+            ray.dst = hitDistance;
+            ray.hit = true;
         }
     }
 
-    if (closestSphere == nullptr) {
-        return vec4(0.0f, 0.0f, 0.0f, 1.0f);
+    // If no spheres where hit than return a miss
+    if (!ray.hit) {
+        return Miss(ray);
     }
 
+    return ClosestHit(ray, spheres);
+}
 
-    // Add a third dimension (depth) for the ray direction
-    vec3 rayOrigin = ray.Origin - closestSphere->position;
-    vec3 rayDirection = ray.Direction;
-    rayDirection = normalize(rayDirection); // normalize the rayDirection
+__device__ HitInfo ClosestHit(Ray& ray, SimpleSphereInfo* spheres) {
+    vec3 origin = ray.Origin - spheres[ray.ObjectIndex].position;
 
-    vec3 intersection;
-    float lightIntensity;
+    // Create hit info
+    HitInfo hitInfo;
+    hitInfo.didHit = true;
+    hitInfo.hitDistance = ray.dst;
+    hitInfo.ObjectIndex = ray.ObjectIndex;
+    hitInfo.worldPos = (origin + ray.Direction * ray.dst); // The ray hit point with sphere offset
+    hitInfo.worldNormal = normalize(hitInfo.worldPos); // Normalize the hitpoint // Interestion
 
-    // Calculate the quadratic formula
-    {
+    // Remove sphere offset // Important to do after setting world normal
+    hitInfo.worldPos += spheres[ray.ObjectIndex].position;
+    
+    return hitInfo;
+}
 
-        intersection = normalize(rayOrigin + rayDirection * closestHit); // Normalize the hitpoint
-
-        vec3 lightDirection(-1, -1, -1);
-        lightDirection = normalize(lightDirection);
-
-        // Invert Light Direction // Dot product gives us the cos of the angle between the values
-        // If the value is nagetive than set it to zero //
-        lightIntensity = max(dot(intersection, -lightDirection), 0.0f); // == cos(angle)
-    }
-
-    vec3 sphereColor = closestSphere->material.color;
-    sphereColor += intersection * 0.5f + 0.5f;
-    sphereColor *= lightIntensity;
-    return vec4(sphereColor, 1);
+__device__ HitInfo Miss(Ray& ray) {
+    HitInfo hitInfo;
+    hitInfo.didHit = false;
+    return hitInfo;
 }
 
 
@@ -124,16 +152,14 @@ __device__ vec2 GetPixelCoordinatesFromIndex(int index, int width, int height) {
     return coords;
 }
 
-__device__ Ray CalculateRayDirection(const vec2& coord, const vec3& rayOrigin, const mat4& inverseView, const mat4& inverseProjection) {
-    Ray ray;
-    ray.Origin = rayOrigin;
+__device__ void CalculateRayDirection(Ray& ray, const vec2& coord, RenderInfo& renderInfo) {
+    ray.Origin = renderInfo.CameraPosition;
 
-    vec4 target = inverseProjection * glm::vec4(coord.x, coord.y, 1, 1);
-    vec3 rayDirection = glm::vec3(inverseView * glm::vec4(glm::normalize(glm::vec3(target) / target.w), 0)); // World space
+    vec4 target = renderInfo.CameraInverseProjection * glm::vec4(coord.x, coord.y, 1, 1);
+    vec3 rayDirection = glm::vec3(renderInfo.CameraInverseView * glm::vec4(glm::normalize(glm::vec3(target) / target.w), 0)); // World space
+    normalize(rayDirection);
     
     ray.Direction = rayDirection;
-
-    return ray;
 }
 
 __device__ uint32_t UIntRandomGen(uint32_t seed) {
@@ -150,99 +176,10 @@ __device__ float FloatRandomGen(uint32_t seed) {
     return result / 4294967295;
 }
 
-// Old Code //
-// Per pixel shader //
-__device__ vec4 PixelShader(vec2& coord) {
-
-    // Add a third dimension (depth) for the ray direction
-    vec3 rayOrigin(0.0f, 0.0f, 1.0f);
-    vec3 rayDirection(coord.x, coord.y, -1.0f);
-    rayDirection = normalize(rayDirection); // normalize the rayDirection
-
-    /*
-    *
-    * Equation of a cirlce and equation of vector put into a quadratic equation
-    * This allows us to use the quadratic formula
-    *
-    *      Value               Value                 Value
-    *        a                   b                     c
-    * (bx^2 + by^2)t^2 + (2(axbx + ayby))t + (ax^2 + ay^2 - r^2) = 0
-    *
-    * t = hit distance  // we want to solve for t
-    * r = radius of cirle
-    *
-    * a = ray origin    // a = bx^2 + by^2 + bz^2    // a = ray direction * ray direction
-    * b = ray direction // b = 2(axbx + ayby)     // b = ray direction * ray origin
-    * c = ray constant  // c = (ax^2 + ay^2 - r^2) // c = (ray origin * ray origin) - radius^2
-    *
-    * Use quadratic equation to solve for t
-    *
-    * Quadratic formula
-    * Plus or minus solutions -> s1 and s2 //
-    *
-    * -b +- sqrt(b^2 - 4ac)
-    * ---------------------
-    *         2a
-    *
-    * The descriminent of the quadratic formula is b^2 - 4ac // This is inside the square root
-    * This can tell us if there was an intersection just not where
-    *
-    * If descriminent > 0
-    * 2 Solutions // Hit
-    *
-    * If descriminent = 0
-    * 1 Solution // Hit
-    *
-    * If descriminent < 0
-    * 0 Solutions // No hit
-    *
-    */
-
-    vec3 intersection;
-    float lightIntensity;
-
-    // Calculate the quadratic formula
-    {
-        // Variables
-        float r = 0.5f;                                     // Radius of sphere
-
-        float a = dot(rayDirection, rayDirection);          // Ray Origin
-        float b = 2.0f * dot(rayOrigin, rayDirection);      // Ray Direction
-        float c = dot(rayOrigin, rayOrigin) - (r * r);      // Ray Constant
-
-        float discriminent = (b * b) - (4.0f * a * c);      // Inside the square root
-
-        // If the ray misses exit early //
-        if (discriminent < 0.0f) {
-            return vec4(0, 0, 0, 1);
-        }
-
-        // Smallest solution to the quadratic formula // Exact intersection point
-        float closetHit = ((-b) - sqrtf(discriminent)) / (2 * a);
-        intersection = normalize(rayOrigin + rayDirection * closetHit); // Normalize the hitpoint
-
-        vec3 lightDirection(-1, -1, -1);
-        lightDirection = normalize(lightDirection);
-
-        // Invert Light Direction // Dot product gives us the cos of the angle between the values
-        // If the value is nagetive than set it to zero //
-        lightIntensity = max(dot(intersection, -lightDirection), 0.0f); // == cos(angle)
-    }
-
-    vec3 sphereColor(1, 0.12f, 0.25f);
-    sphereColor = intersection * 0.5f + 0.5f;
-    sphereColor *= lightIntensity;
-    return vec4(sphereColor, 1);
-}
-
 
 // Main Function //
-void CudaImageGeneration(uint32_t* gpuPixelBuffer, SimpleSphereInfo* gpuSphereBuffer, PreRenderInfo& preRenderInfo) {
-
-    // Use time since epoch as a seed for the random number generator
-    preRenderInfo.seed = static_cast<uint32_t>(duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count());
-
+void CudaImageGeneration(uint32_t* gpuPixelBuffer, SimpleSphereInfo* gpuSphereBuffer, RenderInfo& renderInfo) {
     // Generate Image
-    ImageGeneration <<< preRenderInfo.ImageWidth, 512 >>> (gpuPixelBuffer, gpuSphereBuffer ,preRenderInfo);
+    ImageGeneration <<< renderInfo.ImageWidth, 512 >>> (gpuPixelBuffer, gpuSphereBuffer, renderInfo);
     cudaDeviceSynchronize();
 }

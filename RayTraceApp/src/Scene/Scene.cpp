@@ -29,19 +29,20 @@ SimpleSphereInfo Scene::createSphere() {
 	SimpleSphereInfo sphere;
 
 	// Set color
-	float r = FloatRandomGen(0, 255, NON_NAGATIVE);
-	float g = FloatRandomGen(0, 255, NON_NAGATIVE);
-	float b = FloatRandomGen(0, 255, NON_NAGATIVE);
-	sphere.material.color = { r, g, b };
+	float red = FloatRandomGen(0, 1.0f, NON_NAGATIVE);
+	float green = FloatRandomGen(0, 1.0f, NON_NAGATIVE);
+	float blue = FloatRandomGen(0, 1.0f, NON_NAGATIVE);
+	sphere.material.color = { red, blue, green };
 
 	// Set posision
-	float x = FloatRandomGen(0, 15, POSSIBLE_NAGATIVE);
-	float y = FloatRandomGen(0, 15, POSSIBLE_NAGATIVE);
-	float z = FloatRandomGen(0, 15, POSSIBLE_NAGATIVE);
+	float boxDim = 10.0f;
+	float x = FloatRandomGen(0, boxDim, POSSIBLE_NAGATIVE);
+	float y = FloatRandomGen(0, boxDim, POSSIBLE_NAGATIVE);
+	float z = FloatRandomGen(0, boxDim, POSSIBLE_NAGATIVE);
 	sphere.position = { x, y, z };
 
 	// Sphere Size
-	sphere.radius = FloatRandomGen(0, 1, NON_NAGATIVE);
+	sphere.radius = FloatRandomGen(0.10f, 1.0f, NON_NAGATIVE);
 
 	return sphere;
 }
@@ -88,20 +89,14 @@ float Scene::FloatRandomGen(float min, float max, int sign) {
 		max = min;
 		min = buf;
 	}
-
-	// Get a random number that is within range of min
-	uint32_t seed = static_cast<uint32_t>(duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count());
-	seed = seed * 74779604 + 2891336453;
-	uint32_t result = (seed >> (((seed >> 28) + 4)) ^ seed) * 277803737;
-	result = (result >> 22) ^ result;
-	float finalResult = result / 4294967295;
 	
 	// Make sure the float is in the correct range
-	float randNum = ((max - min) * (((randNum) / (float) RAND_MAX)) + min);
+	// Value = ( minimumValue + randomGeneration ) / ( maximumFloat / ( minimumValue - maximumValue ) )
+	float randNum = min + static_cast <float> (rand()) / (static_cast <float> (RAND_MAX / (max - min)));
 
 	// Random chance of the float being negatvie
-	if (!(rand() % 2) && !sign)
+	if (sign == 0 && !(rand() % 2))
 		return randNum * (float)(-1);
 	else
-		return randNum ;
+		return randNum;
 }

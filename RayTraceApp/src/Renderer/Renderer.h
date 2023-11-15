@@ -32,6 +32,8 @@ public:
 	int getCurrentWidth() { return m_Image->GetWidth(); }
 	int getCurrentTotalPixels() { return pixelCount; }
 
+	int* getCurrentBounceCount() { return &renderInfo.BounceCount; }
+
 private:
 	
 	// Image data
@@ -54,7 +56,7 @@ private:
 	SimpleSphereInfo* gpuSphereBuffer = nullptr;
 
 	// ImageProccessing Data
-	PreRenderInfo preRenderInfo;
+	RenderInfo renderInfo;
 
 	void SetPreRenderInfo(Camera& camera);
 	void SetRenderedImage();
